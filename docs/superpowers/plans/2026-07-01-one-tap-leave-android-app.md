@@ -368,12 +368,15 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -383,30 +386,39 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// DatePicker works in UTC millis; convert without a timezone shift.
+private fun LocalDate.toUtcMillis(): Long =
+    atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+
+private fun Long.toUtcLocalDate(): LocalDate =
+    Instant.ofEpochMilli(this).atZone(ZoneOffset.UTC).toLocalDate()
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LeaveScreen(store: TokenStore) {
     val scope = rememberCoroutineScope()
     var vacation by remember { mutableStateOf(false) }
-    val today = remember { LocalDate.now().toString() }
-    var from by remember { mutableStateOf(today) }
-    var to by remember { mutableStateOf(today) }
+    var from by remember { mutableStateOf(LocalDate.now()) }
+    var to by remember { mutableStateOf(LocalDate.now()) }
     var token by remember { mutableStateOf(store.load() ?: "") }
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var showSick by remember { mutableStateOf(false) }
+    var showVacation by remember { mutableStateOf(false) }
 
     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Daily Swipe Leave", style = MaterialTheme.typography.headlineSmall)
 
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             FilterChip(selected = !vacation, onClick = { vacation = false }, label = { Text("Sick") })
             Spacer(Modifier.width(8.dp))
             FilterChip(selected = vacation, onClick = { vacation = true }, label = { Text("Vacation") })
         }
 
-        OutlinedTextField(from, { from = it }, label = { Text(if (vacation) "From (YYYY-MM-DD)" else "Date (YYYY-MM-DD)") }, singleLine = true)
-        if (vacation) {
-            OutlinedTextField(to, { to = it }, label = { Text("To (YYYY-MM-DD)") }, singleLine = true)
+        if (!vacation) {
+            OutlinedButton(onClick = { showSick = true }) { Text("Date: $from") }
+        } else {
+            OutlinedButton(onClick = { showVacation = true }) { Text("From: $from   To: $to") }
         }
 
         OutlinedTextField(
@@ -419,12 +431,8 @@ fun LeaveScreen(store: TokenStore) {
         Button(
             enabled = !busy && token.isNotBlank(),
             onClick = {
-                val f = from.trim()
-                val t = if (vacation) to.trim() else f
-                if (!isIsoDate(f) || !isIsoDate(t) || t < f) {
-                    status = "Invalid date(s): use YYYY-MM-DD, and To ≥ From."
-                    return@Button
-                }
+                val f = from.toString()
+                val t = (if (vacation) to else from).toString()
                 busy = true; status = "Submitting…"
                 scope.launch {
                     val result = withContext(Dispatchers.IO) { LeaveApi.dispatch(token, f, t) }
@@ -436,10 +444,40 @@ fun LeaveScreen(store: TokenStore) {
 
         if (status.isNotEmpty()) Text(status)
     }
-}
 
-private fun isIsoDate(s: String): Boolean =
-    Regex("""\d{4}-\d{2}-\d{2}""").matches(s) && runCatching { LocalDate.parse(s) }.isSuccess
+    if (showSick) {
+        val state = rememberDatePickerState(initialSelectedDateMillis = from.toUtcMillis())
+        DatePickerDialog(
+            onDismissRequest = { showSick = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { from = it.toUtcLocalDate(); to = from }
+                    showSick = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { showSick = false }) { Text("Cancel") } },
+        ) { DatePicker(state = state) }
+    }
+
+    if (showVacation) {
+        val state = rememberDateRangePickerState(
+            initialSelectedStartDateMillis = from.toUtcMillis(),
+            initialSelectedEndDateMillis = to.toUtcMillis(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { showVacation = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedStartDateMillis?.let { from = it.toUtcLocalDate() }
+                    state.selectedEndDateMillis?.let { to = it.toUtcLocalDate() }
+                    if (to < from) to = from
+                    showVacation = false
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = { showVacation = false }) { Text("Cancel") } },
+        ) { DateRangePicker(state = state, modifier = Modifier.height(500.dp)) }
+    }
+}
 ```
 
 - [ ] **Step 2: Commit, push, verify CI build green**
@@ -462,5 +500,5 @@ Download the APK artifact, sideload it (enable "install unknown apps"). In the a
 - **First Android build will likely need 1–2 CI iterations** for version/config nits; that's expected — fix from the Actions log and re-push (Task 1 isolates this risk before any logic).
 - **No local Android toolchain** — RED/GREEN for the one unit test is confirmed by the CI `testDebugUnitTest` step, not a local run.
 - **Token never leaves the device** except as the `Authorization` header to GitHub; it's stored in `EncryptedSharedPreferences` and never logged.
-- **Date pickers:** MVP uses validated text fields (`YYYY-MM-DD`) to keep the first version simple; a graphical `DatePicker` can be a later enhancement.
+- **Date pickers:** graphical Material3 `DatePicker` (Sick) and `DateRangePicker` (Vacation), shown in a `DatePickerDialog`. `DatePicker` state is UTC-millis — convert with the `toUtcMillis`/`toUtcLocalDate` helpers to avoid an off-by-one day. These are `@ExperimentalMaterial3Api` (opt-in already applied).
 - **JSON building** is a tiny hand-rolled string (dates are validated ISO, so no escaping needed) — no JSON library dependency (YAGNI).
