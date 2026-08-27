@@ -1,3 +1,16 @@
 # Public holidays to skip (YYYY-MM-DD). Edit and push to update.
-# - 2026-08-15
-# - 2026-10-02
+#
+# Source: greytHR /v3/api/leave/holidays/2026, read manually on 2026-08-27.
+# Only mandatory holidays belong here: greytHR also returns "restricted"
+# (floating) holidays, which are days off ONLY if you applied for them.
+#
+# Heads up: greytHR's 2026 list starts at 2026-05-27 — it does not return
+# earlier holidays such as Republic Day, so this is not a full calendar year.
+- 2026-05-27  # Bakrid ID
+- 2026-08-28  # Raksha Bandhan
+- 2026-09-04  # Janmashtami
+- 2026-10-02  # Gandhi Jayanti
+- 2026-10-20  # Dussehra
+- 2026-11-09  # Diwali Holiday
+- 2026-11-24  # Guru Nanak Birthday
+- 2026-12-25  # Christmas
